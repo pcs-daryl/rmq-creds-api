@@ -2,10 +2,14 @@ package main_test
 
 import (
 	"context"
+	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/rabbitmq/messaging-topology-operator/api/v1beta1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"aaaas/rmq-permissions-api/pkg/api/handlers"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -17,6 +21,17 @@ var _ = Describe("RMQ Creds API", func(){
 	BeforeEach(func() {
 		By("Creating some test users")
 		Expect(createUser(ctx, "daryl")).To(Succeed())
+		Expect(createUser(ctx, "jerry")).To(Succeed())
+
+		By("Creating some test permissions")
+		Expect(createPermission(ctx, "daryl-permission","daryl", "some-vhost")).To(Succeed())
+		Expect(createPermission(ctx, "jerry-permission","jerry", "some-vhost")).To(Succeed())
+	})
+
+	AfterEach(func(){
+		By("Deleting tests env")
+		Expect(deleteAllPermissions(ctx)).To(Succeed())
+		Expect(deleteAllUsers(ctx)).To(Succeed())
 	})
 
 	Context("when verifying the startup environment", func(){
@@ -24,6 +39,15 @@ var _ = Describe("RMQ Creds API", func(){
 			user , err := getUser(ctx, "daryl")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(user.ObjectMeta.Name).To(BeEquivalentTo("daryl"))
+		})
+	})
+
+	Context("Checking handler functions", func(){
+		It("Should check that we can list permissions", func(){
+			permissionList, err := handlers.GetPermissionsFromCluster(ctx, k8sClient, namespace)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(permissionList).To(HaveLen(2))
 		})
 	})
 })
@@ -41,6 +65,25 @@ func createUser(ctx context.Context, name string) error {
 	return k8sClient.Create(ctx, user)
 }
 
+func createPermission(ctx context.Context, name string, user string, vhost string) error {
+	permission := &v1beta1.Permission{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+			Namespace: namespace,
+		},
+		Spec: v1beta1.PermissionSpec{
+			User: user,
+			Vhost: vhost,
+			Permissions: v1beta1.VhostPermissions{
+				Configure: "*",
+				Write: "*",
+				Read: "*",
+			},
+		},
+	}
+	return k8sClient.Create(ctx, permission)
+}
+
 func getUser(ctx context.Context, name string)(*v1beta1.User, error) {
 	user := &v1beta1.User{}
 	typeNamespacedName := types.NamespacedName{
@@ -49,4 +92,38 @@ func getUser(ctx context.Context, name string)(*v1beta1.User, error) {
 	}
 	err := k8sClient.Get(ctx, typeNamespacedName, user)
 	return user, err
+}
+
+func deleteAllUsers(ctx context.Context) error {
+	// Define a list to hold all user
+	userList := &v1beta1.UserList{}
+	// List all sequences in the given namespace
+	if err := k8sClient.List(ctx, userList, client.InNamespace(namespace)); err != nil {
+		return fmt.Errorf("failed to list user in namespace %s: %w", namespace, err)
+	}
+
+	// Iterate through each user and delete it
+	for _, user := range userList.Items {
+		if err := k8sClient.Delete(ctx, &user); err != nil {
+			return fmt.Errorf("failed to delete user %s in namespace %s: %w", user.Name, namespace, err)
+		}
+	}
+	return nil
+}
+
+func deleteAllPermissions(ctx context.Context) error {
+	// Define a list to hold all user
+	permissionList := &v1beta1.PermissionList{}
+	// List all sequences in the given namespace
+	if err := k8sClient.List(ctx, permissionList, client.InNamespace(namespace)); err != nil {
+		return fmt.Errorf("failed to list permission in namespace %s: %w", namespace, err)
+	}
+
+	// Iterate through each user and delete it
+	for _, permission := range permissionList.Items {
+		if err := k8sClient.Delete(ctx, &permission); err != nil {
+			return fmt.Errorf("failed to delete permission %s in namespace %s: %w", permission.Name, namespace, err)
+		}
+	}
+	return nil
 }
