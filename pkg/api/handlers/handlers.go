@@ -2,18 +2,18 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 
 	"aaaas/rmq-permissions-api/pkg/api/model"
 
 	"github.com/pcs-aa-aas/commons/pkg/api/server"
 	"github.com/rabbitmq/messaging-topology-operator/api/v1beta1"
-	"golang.org/x/exp/rand"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/kubectl/pkg/scheme"
 )
@@ -35,6 +35,11 @@ func (h HandlerGroup) HandlerManifests() []server.APIHandlerManifest {
 			Path:        "permissions",
 			HTTPMethod:  http.MethodPost,
 			HandlerFunc: h.addPermission,
+		},
+		{
+			Path:        "permissions/delete",
+			HTTPMethod:  http.MethodPost,
+			HandlerFunc: h.deletePermission,
 		},
 	}
 }
@@ -99,9 +104,21 @@ func (k *HandlerGroup) addPermission(s *server.APIServer, c *server.APICtx) (cod
 	}
 }
 
+func (k *HandlerGroup) deletePermission(s *server.APIServer, c *server.APICtx) (code int, obj interface{}) {
+	k8sClient := getK8sClient()
+
+	if err := DeletePermissionFromCluster(c, k8sClient, "default", "user","vhost"); err !=nil{
+		return http.StatusBadRequest, err
+	}
+
+	return http.StatusOK, map[string]interface{}{
+		"message":   "success",
+	}
+}
+
 
 func AddPermissionToCluster(ctx context.Context, k8sClient client.Client, namespace string, permission model.Permission ) error{
-	permissionName := permission.User + "-" + permission.Vhost + "-" +  generateRandomString()
+	permissionName := permission.Vhost + "-" + permission.User
 	rmq_permissions := v1beta1.Permission{
 		TypeMeta: metaV1.TypeMeta{
 			APIVersion: "rabbitmq.com/v1beta1",
@@ -128,8 +145,23 @@ func AddPermissionToCluster(ctx context.Context, k8sClient client.Client, namesp
 	return k8sClient.Create(ctx, &rmq_permissions)
 }
 
-func generateRandomString() string {
-	randomNumber := rand.Intn(999999) + 1
-	// Convert the number to a string
-	return strconv.Itoa(randomNumber)
+func DeletePermissionFromCluster(ctx context.Context, k8sClient client.Client, namespace string, user string, vhost string) error {
+	permission := &v1beta1.Permission{}
+	permissionName := vhost + "-" + user
+	
+	namespacedName := types.NamespacedName{
+		Namespace: namespace,
+		Name:      permissionName,
+	}
+
+	// Fetch the permission with the given name
+	if err := k8sClient.Get(ctx, namespacedName, permission); err != nil {
+		return fmt.Errorf("failed to get permission %s in namespace %s: %w", permissionName, namespace, err)
+	}
+
+	// Delete the fetched permission
+	if err := k8sClient.Delete(ctx, permission); err != nil {
+		return fmt.Errorf("failed to delete permission %s in namespace %s: %w", permissionName, namespace, err)
+	}
+	return nil
 }

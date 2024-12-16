@@ -25,8 +25,8 @@ var _ = Describe("RMQ Creds API", func(){
 		Expect(createUser(ctx, "jerry")).To(Succeed())
 
 		By("Creating some test permissions")
-		Expect(createPermission(ctx, "daryl-permission","daryl", "some-vhost")).To(Succeed())
-		Expect(createPermission(ctx, "jerry-permission","jerry", "some-vhost")).To(Succeed())
+		Expect(createPermission(ctx, "test-daryl","daryl", "test")).To(Succeed())
+		Expect(createPermission(ctx, "test-jerry","jerry", "test")).To(Succeed())
 	})
 
 	AfterEach(func(){
@@ -67,6 +67,15 @@ var _ = Describe("RMQ Creds API", func(){
 			permissionList, err := handlers.GetPermissionsFromCluster(ctx, k8sClient, namespace)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(permissionList).To(HaveLen(3))
+		})
+
+		It("Should delete permissions", func(){
+			err := handlers.DeletePermissionFromCluster(ctx, k8sClient, namespace, "daryl", "test")
+			Expect(err).NotTo(HaveOccurred())
+
+			permissionList, err := handlers.GetPermissionsFromCluster(ctx, k8sClient, namespace)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(permissionList).To(HaveLen(1))
 		})
 	})
 })
