@@ -84,8 +84,10 @@ func GetPermissionsFromCluster(ctx context.Context, k8sClient client.Client, nam
 func (k *HandlerGroup) addPermission(s *server.APIServer, c *server.APICtx) (code int, obj interface{}) {
 	k8sClient := getK8sClient()
 
-	//TODO get from body
-	permission:= model.Permission{}
+	var permission model.Permission
+	if err := c.ShouldBindJSON(&permission); err != nil {
+		return http.StatusBadRequest, err
+	}
 
 	err := AddPermissionToCluster(c, k8sClient, "default", permission)
 	if err != nil{
