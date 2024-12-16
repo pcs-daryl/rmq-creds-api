@@ -10,6 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"aaaas/rmq-permissions-api/pkg/api/handlers"
+	"aaaas/rmq-permissions-api/pkg/api/model"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -48,6 +49,24 @@ var _ = Describe("RMQ Creds API", func(){
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(permissionList).To(HaveLen(2))
+		})
+
+		It("Should add permissions", func(){
+			permission := model.Permission{
+				User: "daryl",
+				Vhost: "newhost",
+				Access: model.Access{
+					Read: "*",
+					Write: "*",
+					Configure: "*",
+				},
+			}
+			err := handlers.AddPermissionToCluster(ctx, k8sClient, namespace, permission)
+			Expect(err).NotTo(HaveOccurred())
+
+			permissionList, err := handlers.GetPermissionsFromCluster(ctx, k8sClient, namespace)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(permissionList).To(HaveLen(3))
 		})
 	})
 })

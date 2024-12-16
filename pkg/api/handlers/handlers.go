@@ -2,12 +2,15 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
+
+	"aaaas/rmq-permissions-api/pkg/api/model"
 
 	"github.com/pcs-aa-aas/commons/pkg/api/server"
 	"github.com/rabbitmq/messaging-topology-operator/api/v1beta1"
+	"golang.org/x/exp/rand"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -79,44 +82,52 @@ func GetPermissionsFromCluster(ctx context.Context, k8sClient client.Client, nam
 }
 
 func (k *HandlerGroup) addPermission(s *server.APIServer, c *server.APICtx) (code int, obj interface{}) {
-	// if err := c.BindJSON(&newAlbum); err != nil {
-	// 	return http.StatusBadRequest, "add album failed"
-	// }
-	clientset := s.SuperClientset
+	k8sClient := getK8sClient()
 
+	//TODO get from body
+	permission:= model.Permission{}
+
+	err := AddPermissionToCluster(c, k8sClient, "default", permission)
+	if err != nil{
+		return http.StatusBadRequest, err
+	}
+
+	return http.StatusOK, map[string]interface{}{
+		"message":   "success",
+	}
+}
+
+
+func AddPermissionToCluster(ctx context.Context, k8sClient client.Client, namespace string, permission model.Permission ) error{
+	permissionName := permission.User + "-" + permission.Vhost + "-" +  generateRandomString()
 	rmq_permissions := v1beta1.Permission{
 		TypeMeta: metaV1.TypeMeta{
 			APIVersion: "rabbitmq.com/v1beta1",
 			Kind:       "Permission",
 		},
 		ObjectMeta: metaV1.ObjectMeta{
-			Name:      "test-generated-permission",
-			Namespace: "default",
+			Name:      permissionName,
+			Namespace: namespace,
 		},
 		Spec: v1beta1.PermissionSpec{
-			Vhost: "test2",
-			User:  "user1",
+			Vhost: permission.Vhost,
+			User:  permission.User,
 			Permissions: v1beta1.VhostPermissions{
-				Write:     ".*",
-				Configure: ".*",
-				Read:      ".*",
+				Write:     permission.Access.Write,
+				Configure: permission.Access.Configure,
+				Read:      permission.Access.Read,
 			},
 			RabbitmqClusterReference: v1beta1.RabbitmqClusterReference{
+				//TODO see how to better handle this
 				Name: "rabbitmqcluster-sample",
 			},
 		},
 	}
+	return k8sClient.Create(ctx, &rmq_permissions)
+}
 
-	//TODO error handling
-	body, _ := json.Marshal(rmq_permissions)
-
-	clientset.AdmissionregistrationV1().RESTClient().
-		Post().
-		AbsPath("/apis/rabbitmq.com/v1beta1").
-		Namespace("default").
-		Resource("permissions").
-		Body(body).
-		Do(c.Context).
-		Into(&rmq_permissions)
-	return http.StatusOK, rmq_permissions.Spec
+func generateRandomString() string {
+	randomNumber := rand.Intn(999999) + 1
+	// Convert the number to a string
+	return strconv.Itoa(randomNumber)
 }
