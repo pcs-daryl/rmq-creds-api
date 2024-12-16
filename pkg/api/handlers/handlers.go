@@ -26,11 +26,6 @@ func (h HandlerGroup) GroupPath() string {
 func (h HandlerGroup) HandlerManifests() []server.APIHandlerManifest {
 	return []server.APIHandlerManifest{
 		{
-			Path:        "pods",
-			HTTPMethod:  http.MethodGet,
-			HandlerFunc: h.getPods,
-		},
-		{
 			Path:        "permissions",
 			HTTPMethod:  http.MethodGet,
 			HandlerFunc: h.getPermissions,
@@ -62,10 +57,15 @@ func (k *HandlerGroup) getPods(s *server.APIServer, c *server.APICtx) (code int,
 
 func getK8sClient() client.Client {
 	//TODO handle this kubeconfig part
-	kubeconfigPath := "/home/administrator/Documents/pipeline-api/conf/supervisorconf"
+	kubeconfigPath := "/mnt/c/Users/Daryl/.kube/config"
 	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
 		log.Fatalf("Error reading kubeconfig: %v", err)
+	}
+
+	err = v1beta1.AddToScheme(scheme.Scheme)
+	if err != nil {
+		log.Fatalf("Error Initialising scheme: %v", err)
 	}
 
 	// Create the controller-runtime client
@@ -76,34 +76,25 @@ func getK8sClient() client.Client {
 	return k8sClient
 }
 
-func GetPodsFromCluster(ctx context.Context, k8sClient client.Client ){
-
-}
-
 func (k *HandlerGroup) getPermissions(s *server.APIServer, c *server.APICtx) (code int, obj interface{}) {
-	clientset := s.SuperClientset
+	k8sClient := getK8sClient()
 
-	rmq_permissions := v1beta1.Permission{}
-	err := clientset.AdmissionregistrationV1().RESTClient().
-		Get().
-		AbsPath("/apis/rabbitmq.com/v1beta1").
-		Namespace("default").
-		Resource("permissions").
-		Name("rabbit-user1-test-permission").
-		Do(c.Context).
-		Into(&rmq_permissions)
+	rmq_permissions, err := getPermissionsFromCluster(c, k8sClient, "default")
 
-	if errors.IsNotFound(err) {
-		fmt.Printf("Permission not found in default namespace\n")
-	} else if statusError, isStatus := err.(*errors.StatusError); isStatus {
-		fmt.Printf("Error getting Permission %v\n", statusError.ErrStatus.Message)
-	} else if err != nil {
-		panic(err.Error())
-	} else {
-		fmt.Printf("Found test Permission in default namespace\n")
+	if err != nil{
+		return http.StatusBadRequest, err
 	}
 
-	return http.StatusOK, rmq_permissions.Spec
+	return http.StatusOK, rmq_permissions
+}
+
+func getPermissionsFromCluster(ctx context.Context, k8sClient client.Client, namespace string)([]v1beta1.Permission, error){
+	permissions := &v1beta1.PermissionList{}
+	listOptions := &client.ListOptions{
+        Namespace: namespace,
+    }
+	err := k8sClient.List(ctx, permissions, listOptions)
+	return permissions.Items, err
 }
 
 func (k *HandlerGroup) addPermission(s *server.APIServer, c *server.APICtx) (code int, obj interface{}) {
