@@ -1,0 +1,8 @@
+apiVersion: rabbitmq.com/v1beta1
+kind: Vhost
+metadata:
+  name: test-vhost # name of this custom resource
+spec:
+  name: test # name of the vhost
+  rabbitmqClusterReference:
+    name: rabbitmqcluster-sample

@@ -46,7 +46,7 @@ func (h HandlerGroup) HandlerManifests() []server.APIHandlerManifest {
 
 func getK8sClient() client.Client {
 	//TODO handle this kubeconfig part
-	kubeconfigPath := "/mnt/c/Users/Daryl/.kube/config"
+	kubeconfigPath := "/home/administrator/Documents/pipeline-api/conf/supervisorconf"
 	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
 		log.Fatalf("Error reading kubeconfig: %v", err)
@@ -70,20 +70,30 @@ func (k *HandlerGroup) getPermissions(s *server.APIServer, c *server.APICtx) (co
 
 	rmq_permissions, err := GetPermissionsFromCluster(c, k8sClient, "default")
 
-	if err != nil{
+	if err != nil {
 		return http.StatusBadRequest, err
 	}
 
 	return http.StatusOK, rmq_permissions
 }
 
-func GetPermissionsFromCluster(ctx context.Context, k8sClient client.Client, namespace string)([]v1beta1.Permission, error){
+func GetPermissionsFromCluster(ctx context.Context, k8sClient client.Client, namespace string) ([]v1beta1.Permission, error) {
 	permissions := &v1beta1.PermissionList{}
 	listOptions := &client.ListOptions{
-        Namespace: namespace,
-    }
+		Namespace: namespace,
+	}
 	err := k8sClient.List(ctx, permissions, listOptions)
 	return permissions.Items, err
+}
+
+func GetPermissionFromCluster(ctx context.Context, k8sClient client.Client, namespace string, permission model.Permission) (v1beta1.Permission, error) {
+	rmqPermission := &v1beta1.Permission{}
+	options := types.NamespacedName{
+		Namespace: namespace,
+		Name:      permission.Vhost + "-" + permission.User + "-permission",
+	}
+	err := k8sClient.Get(ctx, options, rmqPermission)
+	return *rmqPermission, err
 }
 
 func (k *HandlerGroup) addPermission(s *server.APIServer, c *server.APICtx) (code int, obj interface{}) {
@@ -94,30 +104,17 @@ func (k *HandlerGroup) addPermission(s *server.APIServer, c *server.APICtx) (cod
 		return http.StatusBadRequest, err
 	}
 
-	err := AddPermissionToCluster(c, k8sClient, "default", permission)
-	if err != nil{
+	err := UpsertPermission(c, k8sClient, "default", permission)
+	if err != nil {
 		return http.StatusBadRequest, err
 	}
 
 	return http.StatusOK, map[string]interface{}{
-		"message":   "success",
+		"message": "success",
 	}
 }
 
-func (k *HandlerGroup) deletePermission(s *server.APIServer, c *server.APICtx) (code int, obj interface{}) {
-	k8sClient := getK8sClient()
-
-	if err := DeletePermissionFromCluster(c, k8sClient, "default", "user","vhost"); err !=nil{
-		return http.StatusBadRequest, err
-	}
-
-	return http.StatusOK, map[string]interface{}{
-		"message":   "success",
-	}
-}
-
-
-func AddPermissionToCluster(ctx context.Context, k8sClient client.Client, namespace string, permission model.Permission ) error{
+func AddPermissionToCluster(ctx context.Context, k8sClient client.Client, namespace string, permission model.Permission) error {
 	permissionName := permission.Vhost + "-" + permission.User
 	rmq_permissions := v1beta1.Permission{
 		TypeMeta: metaV1.TypeMeta{
@@ -145,10 +142,33 @@ func AddPermissionToCluster(ctx context.Context, k8sClient client.Client, namesp
 	return k8sClient.Create(ctx, &rmq_permissions)
 }
 
+func PatchPermission(ctx context.Context, k8sClient client.Client, namespace string, permission model.Permission, rmqPermisson v1beta1.Permission) error {
+	patch := client.MergeFrom(rmqPermisson.DeepCopy())
+
+	updatedPermission := v1beta1.VhostPermissions{
+		Write:     permission.Access.Write,
+		Configure: permission.Access.Configure,
+		Read:      permission.Access.Read,
+	}
+
+	rmqPermisson.Spec.Permissions = updatedPermission
+	return k8sClient.Patch(ctx, &rmqPermisson, patch)
+}
+
+func UpsertPermission(ctx context.Context, k8sClient client.Client, namespace string, permission model.Permission) error {
+	rmqPermission, err := GetPermissionFromCluster(ctx, k8sClient, namespace, permission)
+
+	if err != nil {
+		return PatchPermission(ctx, k8sClient, namespace, permission, rmqPermission)
+	}
+
+	return AddPermissionToCluster(ctx, k8sClient, namespace, permission)
+}
+
 func DeletePermissionFromCluster(ctx context.Context, k8sClient client.Client, namespace string, user string, vhost string) error {
 	permission := &v1beta1.Permission{}
-	permissionName := vhost + "-" + user
-	
+	permissionName := vhost + "-" + user + "-permission"
+
 	namespacedName := types.NamespacedName{
 		Namespace: namespace,
 		Name:      permissionName,
@@ -164,4 +184,21 @@ func DeletePermissionFromCluster(ctx context.Context, k8sClient client.Client, n
 		return fmt.Errorf("failed to delete permission %s in namespace %s: %w", permissionName, namespace, err)
 	}
 	return nil
+}
+
+func (k *HandlerGroup) deletePermission(s *server.APIServer, c *server.APICtx) (code int, obj interface{}) {
+	k8sClient := getK8sClient()
+
+	var permission model.Permission
+	if err := c.ShouldBindJSON(&permission); err != nil {
+		return http.StatusBadRequest, err
+	}
+
+	if err := DeletePermissionFromCluster(c, k8sClient, "default", permission.User, permission.Vhost); err != nil {
+		return http.StatusBadRequest, err
+	}
+
+	return http.StatusOK, map[string]interface{}{
+		"message": "success",
+	}
 }
