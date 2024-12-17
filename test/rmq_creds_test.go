@@ -69,6 +69,80 @@ var _ = Describe("RMQ Creds API", func() {
 			Expect(permissionList).To(HaveLen(3))
 		})
 
+		It("Should upsert permissions", func() {
+			permission := model.Permission{
+				User:  "daryl",
+				Vhost: "test",
+				Access: model.Access{
+					Read:      ".*",
+					Write:     "*.",
+					Configure: "/*",
+				},
+			}
+			err := handlers.UpsertPermission(ctx, k8sClient, namespace, permission)
+			Expect(err).NotTo(HaveOccurred())
+
+			// should not add new entry since it exists
+			permissionList, err := handlers.GetPermissionsFromCluster(ctx, k8sClient, namespace)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(permissionList).To(HaveLen(2))
+
+			updatedPermission, err := handlers.GetPermissionFromCluster(ctx, k8sClient, namespace, permission)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updatedPermission.Spec.Permissions.Read).To(BeEquivalentTo(".*"))
+			Expect(updatedPermission.Spec.Permissions.Write).To(BeEquivalentTo("*."))
+			Expect(updatedPermission.Spec.Permissions.Configure).To(BeEquivalentTo("/*"))
+
+			permission = model.Permission{
+				User:  "daryl",
+				Vhost: "test2",
+				Access: model.Access{
+					Read:      "*",
+					Write:     "*",
+					Configure: "*",
+				},
+			}
+			err = handlers.UpsertPermission(ctx, k8sClient, namespace, permission)
+			Expect(err).NotTo(HaveOccurred())
+
+			// should add new entry
+			permissionList, err = handlers.GetPermissionsFromCluster(ctx, k8sClient, namespace)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(permissionList).To(HaveLen(3))
+		})
+
+		It("Should handle both insert and update given the same user and vhost", func() {
+			permission := model.Permission{
+				User:  "daryl",
+				Vhost: "test",
+				Access: model.Access{
+					Read:      ".*",
+					Write:     "*.",
+					Configure: "/*",
+				},
+			}
+			err := handlers.UpsertPermission(ctx, k8sClient, namespace, permission)
+			Expect(err).NotTo(HaveOccurred())
+
+			permission = model.Permission{
+				User:  "daryl",
+				Vhost: "test",
+				Access: model.Access{
+					Read:      "*",
+					Write:     "*",
+					Configure: "*",
+				},
+			}
+			err = handlers.UpsertPermission(ctx, k8sClient, namespace, permission)
+			Expect(err).NotTo(HaveOccurred())
+
+			updatedPermission, err := handlers.GetPermissionFromCluster(ctx, k8sClient, namespace, permission)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updatedPermission.Spec.Permissions.Read).To(BeEquivalentTo("*"))
+			Expect(updatedPermission.Spec.Permissions.Write).To(BeEquivalentTo("*"))
+			Expect(updatedPermission.Spec.Permissions.Configure).To(BeEquivalentTo("*"))
+		})
+
 		It("Should delete permissions", func() {
 			err := handlers.DeletePermissionFromCluster(ctx, k8sClient, namespace, "daryl", "test")
 			Expect(err).NotTo(HaveOccurred())

@@ -115,7 +115,7 @@ func (k *HandlerGroup) addPermission(s *server.APIServer, c *server.APICtx) (cod
 }
 
 func AddPermissionToCluster(ctx context.Context, k8sClient client.Client, namespace string, permission model.Permission) error {
-	permissionName := permission.Vhost + "-" + permission.User
+	permissionName := permission.Vhost + "-" + permission.User + "-permission"
 	rmq_permissions := v1beta1.Permission{
 		TypeMeta: metaV1.TypeMeta{
 			APIVersion: "rabbitmq.com/v1beta1",
@@ -158,11 +158,13 @@ func PatchPermission(ctx context.Context, k8sClient client.Client, namespace str
 func UpsertPermission(ctx context.Context, k8sClient client.Client, namespace string, permission model.Permission) error {
 	rmqPermission, err := GetPermissionFromCluster(ctx, k8sClient, namespace, permission)
 
+	// if there is error, permission does not exist so need to add it
 	if err != nil {
-		return PatchPermission(ctx, k8sClient, namespace, permission, rmqPermission)
+		return AddPermissionToCluster(ctx, k8sClient, namespace, permission)
 	}
 
-	return AddPermissionToCluster(ctx, k8sClient, namespace, permission)
+	fmt.Println("Updating permission in cluster")
+	return PatchPermission(ctx, k8sClient, namespace, permission, rmqPermission)
 }
 
 func DeletePermissionFromCluster(ctx context.Context, k8sClient client.Client, namespace string, user string, vhost string) error {
